@@ -409,7 +409,7 @@ const NAV_ITEMS = [
   { key: "all", label: "View All", icon: "list" },
   { key: "map", label: "Warehouse Map", icon: "map" },
   { key: "storage", label: "Storage Setup", icon: "shelf" },
-  { key: "support", label: "Support", icon: "support", adminOnly: true },
+  { key: "support", label: "Support", icon: "support" },
   { key: "admin", label: "Admin Panel", icon: "shield", adminOnly: true },
   { key: "settings", label: "Settings", icon: "settings" },
 ];
@@ -437,10 +437,10 @@ function Sidebar({ view, setView, collapsed, setCollapsed, isAdmin, authUser, us
             key={n.key}
             className={"nav-item" + (view === n.key ? " active" : "")}
             onClick={() => setView(n.key)}
-            title={collapsed ? n.label : undefined}
+            title={collapsed ? (n.key === "support" && isAdmin ? "Tickets" : n.label) : undefined}
           >
             <span className="nav-icon"><Icon name={n.icon} size={17} /></span>
-            {!collapsed && <span>{n.label}</span>}
+            {!collapsed && <span>{n.key === "support" && isAdmin ? "Tickets" : n.label}</span>}
             {n.key === "support" && openTicketCount > 0 && !collapsed && (
               <span className="nav-badge">{openTicketCount}</span>
             )}
@@ -551,10 +551,14 @@ function App() {
       .catch((e) => console.warn("users_meta fetch failed:", e));
   }, [authUser]);
 
-  // Admin-only: live support ticket subscription (for nav badge + Support view)
+  // Live support ticket subscription (for nav badge + Support/Tickets view).
+  // Admins see every ticket; regular users see only their own.
   useEffect(() => {
-    if (!authUser || !isAdmin) { setSupportTickets([]); return; }
-    const unsub = db.collection("support_tickets").onSnapshot((snap) => {
+    if (!authUser) { setSupportTickets([]); return; }
+    const query = isAdmin
+      ? db.collection("support_tickets")
+      : db.collection("support_tickets").where("authorUid", "==", authUser.uid);
+    const unsub = query.onSnapshot((snap) => {
       setSupportTickets(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     }, (e) => console.warn("support_tickets subscription error:", e));
     return () => unsub();
@@ -562,7 +566,7 @@ function App() {
 
   // Defense in depth: redirect non-admins away from admin-only views
   useEffect(() => {
-    if ((view === "support" || view === "admin") && !isAdmin) {
+    if (view === "admin" && !isAdmin) {
       setView("dashboard");
     }
   }, [view, isAdmin]);
@@ -611,7 +615,7 @@ function App() {
   else if (view === "all") content = <ViewAll {...sharedProps} />;
   else if (view === "map") content = <WarehouseMap {...sharedProps} />;
   else if (view === "storage") content = <StorageSetup {...sharedProps} />;
-  else if (view === "support" && isAdmin) content = <Support {...sharedProps} />;
+  else if (view === "support") content = <Support {...sharedProps} />;
   else if (view === "admin" && isAdmin) content = <AdminPanel {...sharedProps} />;
   else if (view === "settings") content = <Settings {...sharedProps} />;
 
@@ -2706,8 +2710,10 @@ function Support({ authUser, isAdmin, username, notify, supportTickets }) {
 
   return (
     <div>
-      <h1 className="page-title">Support</h1>
-      <p className="page-sub">Internal ticket tracking.</p>
+      <h1 className="page-title">{isAdmin ? "Tickets" : "Support"}</h1>
+      <p className="page-sub">
+        {isAdmin ? "Respond to open support tickets from users." : "Open a ticket and we'll get back to you."}
+      </p>
 
       <div className="support-layout">
         <div>

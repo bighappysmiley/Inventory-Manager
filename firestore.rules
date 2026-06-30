@@ -67,15 +67,43 @@ service cloud.firestore {
 
     // ---------------------------------------------------------
     // support_tickets/{ticketId} (+ replies subcollection)
-    // Admin-only end to end — this area is entirely hidden from
-    // non-admin users in the UI, and Firestore enforces the same here.
+    // Any signed-in user may open a ticket and read/reply on their OWN
+    // tickets. Admins may read/reply on every ticket and are the only
+    // ones who can change a ticket's status.
     // ---------------------------------------------------------
     match /support_tickets/{ticketId} {
-      allow read, create, update: if isAdmin();
+      function isTicketOwner() {
+        return signedIn() && resource.data.authorUid == request.auth.uid;
+      }
+
+      allow read: if isAdmin() || isTicketOwner();
+      allow create: if signedIn()
+        && request.resource.data.authorUid == request.auth.uid
+        && request.resource.data.status == 'open';
+      // Admins can change anything (status, etc). The ticket owner may only
+      // bump updatedAt (e.g. when posting a reply) on a ticket that isn't
+      // already closed — they can never change status or reassign the ticket.
+      allow update: if isAdmin()
+        || (isTicketOwner()
+            && resource.data.status != 'closed'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt']));
       allow delete: if false;
 
       match /replies/{replyId} {
-        allow read, create: if isAdmin();
+        function parentTicket() {
+          return get(/databases/$(database)/documents/support_tickets/$(ticketId)).data;
+        }
+        function isParentTicketOwner() {
+          return signedIn() && parentTicket().authorUid == request.auth.uid;
+        }
+
+        allow read: if isAdmin() || isParentTicketOwner();
+        allow create: if parentTicket().status != 'closed'
+          && request.resource.data.authorUid == request.auth.uid
+          && (
+            (isAdmin() && request.resource.data.isAdmin == true)
+            || (isParentTicketOwner() && request.resource.data.isAdmin == false)
+          );
         allow update, delete: if false;
       }
     }
