@@ -2011,6 +2011,27 @@ function StorageSetup({ authUser, items, shelves, settings, setSettings, notify 
               {busy ? "Creating…" : "Create Shelf"}
             </button>
           </form>
+
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
+            <h3 className="panel-title" style={{ marginBottom: 10 }}>Preview</h3>
+            <div className="card" style={{ background: "var(--bg)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div>
+                  <h3 style={{ margin: "0 0 2px" }}>{form.name.trim() || "Unnamed Shelf"}</h3>
+                  <span className="badge badge-muted">{form.type}</span>
+                </div>
+              </div>
+              <div style={{ margin: "12px 0" }}>
+                <ShelfSlotGrid filled={0} total={(Number(form.rows) || 1) * (Number(form.cols) || 1)} color={form.color} />
+              </div>
+              <div className="progress-track" style={{ marginBottom: 6 }}>
+                <div className="progress-fill" style={{ width: "0%", background: form.color }} />
+              </div>
+              <div style={{ fontSize: "0.78rem", color: "var(--muted)" }}>
+                {Number(form.rows) || 1}×{Number(form.cols) || 1} · 0% full
+              </div>
+            </div>
+          </div>
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
