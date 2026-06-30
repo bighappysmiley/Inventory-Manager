@@ -42,6 +42,8 @@ const ADMIN_DOMAIN = "@bighappysmiley.com";
 const TICKET_STATUSES = ["open", "in-progress", "resolved", "closed"];
 const TICKET_STATUS_LABEL = { open: "Open", "in-progress": "In Progress", resolved: "Resolved", closed: "Closed" };
 const TICKET_STATUS_BADGE = { open: "badge-info", "in-progress": "badge-muted", resolved: "badge-success", closed: "badge-danger" };
+const TICKET_PRIORITIES = ["low", "medium", "high"];
+const TICKET_PRIORITY_BADGE = { low: "badge-muted", medium: "badge-info", high: "badge-danger" };
 
 // ============================================================
 // UTILITIES
@@ -1254,7 +1256,611 @@ function ViewAll({ authUser, items, shelves, categories, customFields, notify })
     </div>
   );
 }
-function WarehouseMap(props) { return <div className="empty-state">Warehouse Map — coming soon.</div>; }
+const MAP_CANVAS_W = 900;
+const MAP_CANVAS_H = 520;
+
+function WarehouseMap2D({ authUser, shelves, items, settings, setSettings, notify }) {
+  const [layout, setLayout] = useState(settings.mapLayout || []);
+  const layoutRef = useRef(layout);
+  const dragRef = useRef(null); // { id, offsetX, offsetY }
+  const containerRef = useRef(null);
+
+  useEffect(() => { layoutRef.current = layout; }, [layout]);
+  useEffect(() => { setLayout(settings.mapLayout || []); }, [settings.mapLayout]);
+
+  const persistLayout = async (next) => {
+    setSettings((s) => ({ ...s, mapLayout: next }));
+    try {
+      await db.collection("users").doc(authUser.uid).collection("meta").doc("settings").set({ mapLayout: next }, { merge: true });
+    } catch (err) {
+      notify("Failed to save map layout: " + err.message, "error");
+    }
+  };
+
+  const addToMap = (shelf) => {
+    if (layoutRef.current.some((m) => m.id === shelf.id)) return;
+    const next = [...layoutRef.current, { id: shelf.id, x: 20 + (layoutRef.current.length % 5) * 30, y: 20 + (layoutRef.current.length % 5) * 30, w: 130, h: 90 }];
+    setLayout(next);
+    persistLayout(next);
+  };
+
+  const removeFromMap = (shelf) => {
+    const next = layoutRef.current.filter((m) => m.id !== shelf.id);
+    setLayout(next);
+    persistLayout(next);
+  };
+
+  const onMouseDown = (e, entry) => {
+    const rect = containerRef.current.getBoundingClientRect();
+    dragRef.current = {
+      id: entry.id,
+      offsetX: e.clientX - rect.left - entry.x,
+      offsetY: e.clientY - rect.top - entry.y,
+    };
+  };
+
+  useEffect(() => {
+    const onMove = (e) => {
+      if (!dragRef.current || !containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const entry = layoutRef.current.find((m) => m.id === dragRef.current.id);
+      if (!entry) return;
+      let x = e.clientX - rect.left - dragRef.current.offsetX;
+      let y = e.clientY - rect.top - dragRef.current.offsetY;
+      x = Math.max(0, Math.min(MAP_CANVAS_W - entry.w, x));
+      y = Math.max(0, Math.min(MAP_CANVAS_H - entry.h, y));
+      const next = layoutRef.current.map((m) => m.id === entry.id ? { ...m, x, y } : m);
+      layoutRef.current = next;
+      setLayout(next);
+    };
+    const onUp = () => {
+      if (!dragRef.current) return;
+      dragRef.current = null;
+      persistLayout(layoutRef.current);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []);
+
+  const itemCountForShelf = (shelf) => items.filter((it) => it.location === shelf.name).length;
+  const placedIds = new Set(layout.map((m) => m.id));
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 18 }}>
+      <div
+        ref={containerRef}
+        className="card"
+        style={{ position: "relative", width: MAP_CANVAS_W, height: MAP_CANVAS_H, overflow: "hidden", padding: 0 }}
+      >
+        {layout.map((entry) => {
+          const shelf = shelves.find((s) => s.id === entry.id);
+          if (!shelf) return null;
+          return (
+            <div
+              key={entry.id}
+              onMouseDown={(e) => onMouseDown(e, entry)}
+              style={{
+                position: "absolute", left: entry.x, top: entry.y, width: entry.w, height: entry.h,
+                background: (shelf.color || "#7c3aed") + "26", border: "2px solid " + (shelf.color || "#7c3aed"),
+                borderRadius: 8, cursor: "grab", padding: 8, userSelect: "none",
+              }}
+            >
+              <div style={{ fontWeight: 700, fontSize: "0.82rem" }}>{shelf.name}</div>
+              <div style={{ fontSize: "0.7rem", color: "var(--muted)" }}>{itemCountForShelf(shelf)} item(s)</div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="card">
+        <h3 className="panel-title">Shelves</h3>
+        {shelves.length === 0 ? (
+          <div className="empty-state">No shelves configured yet.</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {shelves.map((shelf) => {
+              const placed = placedIds.has(shelf.id);
+              return (
+                <div key={shelf.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span className="dot" style={{ background: shelf.color || "#7c3aed" }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: "0.85rem", fontWeight: 600 }}>{shelf.name}</div>
+                    <div style={{ fontSize: "0.72rem", color: "var(--muted)" }}>{itemCountForShelf(shelf)} item(s)</div>
+                  </div>
+                  <button className="btn btn-sm btn-secondary" onClick={() => placed ? removeFromMap(shelf) : addToMap(shelf)}>
+                    {placed ? "Remove" : "Add"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// 3D WAREHOUSE WALKTHROUGH
+// ============================================================
+const WORLD_W = 36;
+const WORLD_D = 24;
+const WALL_H = 7;
+const MOVE_SPEED = 4.2;
+const SPRINT_MULT = 1.9;
+const EYE_HEIGHT = 1.7;
+
+function makeCanvasTexture(draw, w = 256, h = 128) {
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  draw(ctx, w, h);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+function makeFloorTexture() {
+  return makeCanvasTexture((ctx, w, h) => {
+    ctx.fillStyle = "#c9cdd6";
+    ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = "rgba(255,255,255,0.35)";
+    ctx.lineWidth = 2;
+    const tile = 32;
+    for (let x = 0; x <= w; x += tile) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
+    for (let y = 0; y <= h; y += tile) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+    ctx.fillStyle = "#f2c200";
+    ctx.fillRect(0, h / 2 - 4, w, 8);
+  }, 512, 512);
+}
+
+function makeSignTexture(title, sub1, sub2, color) {
+  return makeCanvasTexture((ctx, w, h) => {
+    ctx.fillStyle = "#13161e";
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = color;
+    ctx.fillRect(0, 0, w, 8);
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 26px Arial";
+    ctx.fillText(title, 12, 44);
+    ctx.font = "16px Arial";
+    ctx.fillStyle = "#cfd3e0";
+    ctx.fillText(sub1, 12, 72);
+    ctx.fillText(sub2, 12, 96);
+  }, 320, 128);
+}
+
+function makeItemLabelTexture(item, color) {
+  return makeCanvasTexture((ctx, w, h) => {
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = color;
+    ctx.fillRect(0, 0, w, 6);
+    ctx.fillStyle = "#111";
+    ctx.font = "bold 15px Arial";
+    ctx.fillText((item.category || "Other"), 8, 24);
+    ctx.font = "bold 13px Arial";
+    ctx.fillText((item.name || "Item").slice(0, 18), 8, 42);
+    ctx.font = "11px Arial";
+    ctx.fillStyle = "#444";
+    ctx.fillText("Qty: " + (item.quantity != null ? item.quantity : "—"), 8, 58);
+    ctx.fillText("SKU: " + (item.sku || "—"), 8, 72);
+  }, 200, 90);
+}
+
+function buildShelfGroup(shelf, items) {
+  const group = new THREE.Group();
+  const rows = Math.max(1, shelf.rows || 1);
+  const cols = Math.max(1, shelf.cols || 1);
+  const width = Math.max(2, cols * 0.9);
+  const depth = 1.0;
+  const height = Math.max(1.5, rows * 0.65 + 0.4);
+  const color = new THREE.Color(shelf.color || "#7c3aed");
+
+  const steelMat = new THREE.MeshStandardMaterial({ color: 0x8a8f9e, metalness: 0.6, roughness: 0.4 });
+  const backMat = new THREE.MeshStandardMaterial({ color: 0xb6bac6, metalness: 0.3, roughness: 0.6 });
+
+  const back = new THREE.Mesh(new THREE.BoxGeometry(width, height, 0.05), backMat);
+  back.position.set(0, height / 2, -depth / 2 + 0.025);
+  back.castShadow = true; back.receiveShadow = true;
+  group.add(back);
+
+  [-width / 2, width / 2].forEach((sx) => {
+    const upright = new THREE.Mesh(new THREE.BoxGeometry(0.08, height, depth), steelMat);
+    upright.position.set(sx, height / 2, 0);
+    upright.castShadow = true;
+    group.add(upright);
+    for (let b = 0; b < 3; b++) {
+      const bolt = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.02, 8), new THREE.MeshStandardMaterial({ color: 0x3a3d46 }));
+      bolt.rotation.x = Math.PI / 2;
+      bolt.position.set(sx, 0.3 + b * (height / 3), depth / 2 - 0.03);
+      group.add(bolt);
+    }
+  });
+
+  const boardH = height / rows;
+  for (let r = 0; r <= rows; r++) {
+    const board = new THREE.Mesh(new THREE.BoxGeometry(width, 0.05, depth), steelMat);
+    board.position.set(0, r * boardH, 0);
+    board.castShadow = true; board.receiveShadow = true;
+    group.add(board);
+    const lip = new THREE.Mesh(new THREE.BoxGeometry(width, 0.06, 0.04), steelMat);
+    lip.position.set(0, r * boardH + 0.03, depth / 2 - 0.02);
+    group.add(lip);
+  }
+
+  const itemMeshes = [];
+  const capacity = rows * cols;
+  const shelfItems = items.slice(0, capacity);
+  shelfItems.forEach((item, i) => {
+    const row = Math.floor(i / cols);
+    const col = i % cols;
+    const boxSize = 0.32;
+    const catColor = item.__categoryColor || "#6b7094";
+    const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(catColor), roughness: 0.55 });
+    const box = new THREE.Mesh(new THREE.BoxGeometry(boxSize, boxSize, boxSize), mat);
+    const x = -width / 2 + (col + 0.5) * (width / cols);
+    const y = row * boardH + boxSize / 2 + 0.04;
+    const z = 0;
+    box.position.set(x, y, z);
+    box.castShadow = true;
+    group.add(box);
+
+    const labelTex = makeItemLabelTexture(item, catColor);
+    const labelMat = new THREE.MeshBasicMaterial({ map: labelTex, transparent: true });
+    const label = new THREE.Mesh(new THREE.PlaneGeometry(boxSize * 1.4, boxSize * 0.65), labelMat);
+    label.position.set(x, y + boxSize * 0.55, z + depth / 2 + 0.01);
+    group.add(label);
+
+    itemMeshes.push({ mesh: box, item });
+  });
+
+  const signTex = makeSignTexture(shelf.name, shelfItems.length + "/" + capacity + " slots filled", rows + " rows × " + cols + " cols", shelf.color || "#7c3aed");
+  const signMat = new THREE.MeshBasicMaterial({ map: signTex, transparent: true });
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 0.72), signMat);
+  sign.position.set(0, height + 0.5, 0);
+  group.add(sign);
+
+  return { group, itemMeshes };
+}
+
+function WarehouseMap3D({ shelves, items, settings, categories }) {
+  const mountRef = useRef(null);
+  const stateRef = useRef({});
+  const [entered, setEntered] = useState(false);
+  const [fps, setFps] = useState(0);
+  const [selectedItem, setSelectedItem] = useState(null);
+
+  const mapLayout = settings.mapLayout || [];
+  const hasShelvesOnMap = mapLayout.length > 0 && shelves.length > 0;
+
+  useEffect(() => {
+    const mount = mountRef.current;
+    if (!mount) return;
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xbfe0f5);
+    scene.fog = new THREE.Fog(0xbfe0f5, 14, 40);
+
+    const camera = new THREE.PerspectiveCamera(70, mount.clientWidth / mount.clientHeight, 0.1, 100);
+    camera.position.set(0, EYE_HEIGHT, WORLD_D / 2 - 2);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(mount.clientWidth, mount.clientHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    if (renderer.outputEncoding !== undefined) renderer.outputEncoding = THREE.sRGBEncoding;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.1;
+    mount.appendChild(renderer.domElement);
+
+    // Lights
+    const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+    sun.position.set(10, 16, 8);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(1024, 1024);
+    sun.shadow.camera.left = -20; sun.shadow.camera.right = 20;
+    sun.shadow.camera.top = 20; sun.shadow.camera.bottom = -20;
+    scene.add(sun);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+    const fill = new THREE.HemisphereLight(0xddeeff, 0x444455, 0.4);
+    scene.add(fill);
+
+    // Floor
+    const floorTex = makeFloorTexture();
+    floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
+    floorTex.repeat.set(WORLD_W / 4, WORLD_D / 4);
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(WORLD_W, WORLD_D),
+      new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.85 })
+    );
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    scene.add(floor);
+
+    // Walls + baseboards
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0xf5f6f8, roughness: 0.9 });
+    const baseMat = new THREE.MeshStandardMaterial({ color: 0x8d909c, roughness: 0.7 });
+    const wallDefs = [
+      { w: WORLD_W, d: 0.2, x: 0, z: -WORLD_D / 2 },
+      { w: WORLD_W, d: 0.2, x: 0, z: WORLD_D / 2 },
+      { w: 0.2, d: WORLD_D, x: -WORLD_W / 2, z: 0 },
+      { w: 0.2, d: WORLD_D, x: WORLD_W / 2, z: 0 },
+    ];
+    wallDefs.forEach((d) => {
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(d.w, WALL_H, d.d), wallMat);
+      wall.position.set(d.x, WALL_H / 2, d.z);
+      wall.receiveShadow = true;
+      scene.add(wall);
+      const base = new THREE.Mesh(new THREE.BoxGeometry(d.w, 0.3, d.d + 0.05), baseMat);
+      base.position.set(d.x, 0.15, d.z);
+      scene.add(base);
+    });
+
+    // Ceiling beams + fixtures
+    for (let i = -1; i <= 1; i++) {
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, WORLD_D), new THREE.MeshStandardMaterial({ color: 0x9a9da6 }));
+      beam.position.set(i * (WORLD_W / 3), WALL_H - 0.2, 0);
+      scene.add(beam);
+      const fixture = new THREE.Mesh(
+        new THREE.BoxGeometry(2.2, 0.1, 0.3),
+        new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 1.2 })
+      );
+      fixture.position.set(i * (WORLD_W / 3), WALL_H - 0.4, 0);
+      scene.add(fixture);
+      const fixtureLight = new THREE.PointLight(0xffffff, 0.6, 14);
+      fixtureLight.position.set(i * (WORLD_W / 3), WALL_H - 0.6, 0);
+      scene.add(fixtureLight);
+    }
+
+    // Shelves
+    const itemMeshes = [];
+    mapLayout.forEach((entry) => {
+      const shelf = shelves.find((s) => s.id === entry.id);
+      if (!shelf) return;
+      const shelfItems = items
+        .filter((it) => it.location === shelf.name)
+        .map((it) => ({ ...it, __categoryColor: categories[it.category] || "#6b7094" }));
+      const { group, itemMeshes: meshes } = buildShelfGroup(shelf, shelfItems);
+      const wx = (entry.x / MAP_CANVAS_W - 0.5) * (WORLD_W - 4);
+      const wz = (entry.y / MAP_CANVAS_H - 0.5) * (WORLD_D - 4);
+      group.position.set(wx, 0, wz);
+      scene.add(group);
+      meshes.forEach((m) => {
+        itemMeshes.push(m);
+      });
+    });
+
+    // Hover outline
+    const outline = new THREE.Mesh(
+      new THREE.BoxGeometry(1, 1, 1),
+      new THREE.MeshBasicMaterial({ color: 0xffb000, wireframe: true })
+    );
+    outline.visible = false;
+    scene.add(outline);
+
+    const raycaster = new THREE.Raycaster();
+    const center = new THREE.Vector2(0, 0);
+
+    // Movement state
+    const keys = {};
+    let yaw = Math.PI;
+    let pitch = 0;
+    let walkDist = 0;
+    const onKeyDown = (e) => {
+      keys[e.code] = true;
+      if (e.code === "Escape") {
+        setSelectedItem(null);
+        if (document.pointerLockElement === mount) document.exitPointerLock();
+      }
+      if (e.code === "KeyE" && document.pointerLockElement === mount) {
+        inspectUnderCrosshair();
+      }
+    };
+    const onKeyUp = (e) => { keys[e.code] = false; };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+
+    const onMouseMove = (e) => {
+      if (document.pointerLockElement !== mount) return;
+      yaw -= e.movementX * 0.0022;
+      pitch -= e.movementY * 0.0022;
+      pitch = Math.max(-1.3, Math.min(1.3, pitch));
+    };
+    document.addEventListener("mousemove", onMouseMove);
+
+    function inspectUnderCrosshair() {
+      raycaster.setFromCamera(center, camera);
+      const hits = raycaster.intersectObjects(itemMeshes.map((m) => m.mesh));
+      if (hits.length > 0) {
+        const hit = itemMeshes.find((m) => m.mesh === hits[0].object);
+        if (hit) setSelectedItem(hit.item);
+      }
+    }
+
+    const onClick = () => {
+      if (document.pointerLockElement !== mount) {
+        mount.requestPointerLock();
+      } else {
+        inspectUnderCrosshair();
+      }
+    };
+    mount.addEventListener("click", onClick);
+
+    const onPointerLockChange = () => {
+      setEntered(document.pointerLockElement === mount);
+    };
+    document.addEventListener("pointerlockchange", onPointerLockChange);
+
+    const onResize = () => {
+      camera.aspect = mount.clientWidth / mount.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(mount.clientWidth, mount.clientHeight);
+    };
+    window.addEventListener("resize", onResize);
+
+    let lastTime = performance.now();
+    let frameAccum = 0, frameCount = 0;
+    let raf = null;
+
+    function animate() {
+      raf = requestAnimationFrame(animate);
+      const now = performance.now();
+      const dt = Math.min(0.05, (now - lastTime) / 1000);
+      lastTime = now;
+
+      frameAccum += dt; frameCount++;
+      if (frameAccum >= 0.4) {
+        setFps(Math.round(frameCount / frameAccum));
+        frameAccum = 0; frameCount = 0;
+      }
+
+      if (document.pointerLockElement === mount) {
+        const sprint = keys["ShiftLeft"] || keys["ShiftRight"];
+        const speed = MOVE_SPEED * (sprint ? SPRINT_MULT : 1) * dt;
+        const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+        const right = new THREE.Vector3(Math.sin(yaw + Math.PI / 2), 0, Math.cos(yaw + Math.PI / 2));
+        let moved = false;
+        const move = new THREE.Vector3();
+        if (keys["KeyW"] || keys["ArrowUp"]) { move.add(forward); moved = true; }
+        if (keys["KeyS"] || keys["ArrowDown"]) { move.sub(forward); moved = true; }
+        if (keys["KeyA"] || keys["ArrowLeft"]) { move.sub(right); moved = true; }
+        if (keys["KeyD"] || keys["ArrowRight"]) { move.add(right); moved = true; }
+        if (moved) {
+          move.normalize().multiplyScalar(speed);
+          const nx = camera.position.x + move.x;
+          const nz = camera.position.z + move.z;
+          camera.position.x = Math.max(-WORLD_W / 2 + 0.5, Math.min(WORLD_W / 2 - 0.5, nx));
+          camera.position.z = Math.max(-WORLD_D / 2 + 0.5, Math.min(WORLD_D / 2 - 0.5, nz));
+          walkDist += speed;
+        }
+        camera.position.y = EYE_HEIGHT + Math.sin(walkDist * 6) * (moved ? 0.04 : 0);
+
+        camera.rotation.order = "YXZ";
+        camera.rotation.y = yaw;
+        camera.rotation.x = pitch;
+
+        raycaster.setFromCamera(center, camera);
+        const hits = raycaster.intersectObjects(itemMeshes.map((m) => m.mesh));
+        if (hits.length > 0 && hits[0].distance < 4) {
+          const obj = hits[0].object;
+          obj.geometry.computeBoundingBox();
+          obj.getWorldPosition(outline.position);
+          outline.scale.set(1, 1, 1);
+          outline.geometry.dispose();
+          outline.geometry = new THREE.BoxGeometry(
+            obj.geometry.parameters.width * 1.15,
+            obj.geometry.parameters.height * 1.15,
+            obj.geometry.parameters.depth * 1.15
+          );
+          outline.visible = true;
+        } else {
+          outline.visible = false;
+        }
+      }
+
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    stateRef.current = { renderer, mount };
+
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("pointerlockchange", onPointerLockChange);
+      window.removeEventListener("resize", onResize);
+      mount.removeEventListener("click", onClick);
+      if (document.pointerLockElement === mount) document.exitPointerLock();
+      renderer.dispose();
+      if (renderer.domElement && renderer.domElement.parentNode === mount) {
+        mount.removeChild(renderer.domElement);
+      }
+    };
+  }, [shelves, items, settings.mapLayout, categories]);
+
+  return (
+    <div style={{ position: "relative", width: "100%", height: 560, borderRadius: 12, overflow: "hidden", background: "#bfe0f5" }}>
+      <div ref={mountRef} style={{ width: "100%", height: "100%" }} />
+
+      {!entered && (
+        <div style={{
+          position: "absolute", inset: 0, background: "rgba(10,12,18,0.55)", color: "#fff",
+          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, textAlign: "center", padding: 20,
+        }}>
+          <h2 style={{ margin: 0 }}>Click to Enter</h2>
+          {!hasShelvesOnMap && (
+            <p style={{ color: "#ffce6b", maxWidth: 360 }}>
+              No shelves are placed on the map yet — add shelves to the 2D Floor Plan first.
+            </p>
+          )}
+          <p style={{ maxWidth: 380, fontSize: "0.85rem", opacity: 0.85 }}>
+            WASD / Arrows to move · Mouse to look · Shift to sprint<br />
+            Click or press E to inspect · Esc to exit
+          </p>
+        </div>
+      )}
+
+      {entered && (
+        <div style={{ position: "absolute", top: 12, left: 12, background: "rgba(0,0,0,0.5)", color: "#fff", padding: "4px 10px", borderRadius: 6, fontSize: "0.75rem", fontFamily: "monospace" }}>
+          {fps} FPS
+        </div>
+      )}
+
+      {entered && (
+        <div style={{ position: "absolute", bottom: 12, left: 12, background: "rgba(0,0,0,0.5)", borderRadius: 8, padding: "8px 10px", display: "flex", flexDirection: "column", gap: 4 }}>
+          {Object.entries(categories).map(([cat, color]) => (
+            <div key={cat} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.7rem", color: "#fff" }}>
+              <span className="dot" style={{ background: color }} /> {cat}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {selectedItem && (
+        <div style={{
+          position: "absolute", top: 12, right: 12, width: 240, background: "rgba(15,17,25,0.85)",
+          backdropFilter: "blur(6px)", borderRadius: 10, padding: 14, color: "#fff",
+          borderLeft: "4px solid " + (categories[selectedItem.category] || "#7c3aed"),
+        }}>
+          <button className="icon-btn" style={{ float: "right", color: "#fff" }} onClick={() => setSelectedItem(null)}><Icon name="x" size={14} /></button>
+          <h3 style={{ margin: "0 0 8px", fontSize: "1rem" }}>{selectedItem.name}</h3>
+          <div style={{ fontSize: "0.78rem", display: "flex", flexDirection: "column", gap: 4, opacity: 0.9 }}>
+            <div>Category: {selectedItem.category || "Other"}</div>
+            <div>Quantity: {selectedItem.quantity}</div>
+            <div>SKU: {selectedItem.sku || "—"}</div>
+            <div>Min Stock: {selectedItem.minStock || 0}</div>
+            <div>Price: ${selectedItem.price || 0}</div>
+            <div>Location: {compactLocation(selectedItem)}</div>
+            {selectedItem.notes && <div>Notes: {selectedItem.notes}</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WarehouseMap(props) {
+  const [mode, setMode] = useState("3d");
+  return (
+    <div>
+      <h1 className="page-title">Warehouse Map</h1>
+      <p className="page-sub">Visualize and arrange your storage layout.</p>
+      <div className="tabs">
+        <button className={"tab-btn" + (mode === "3d" ? " active" : "")} onClick={() => setMode("3d")}>3D Walkthrough</button>
+        <button className={"tab-btn" + (mode === "2d" ? " active" : "")} onClick={() => setMode("2d")}>2D Floor Plan</button>
+      </div>
+      {mode === "2d" ? <WarehouseMap2D {...props} /> : <WarehouseMap3D {...props} />}
+    </div>
+  );
+}
 const EMPTY_SHELF_FORM = { name: "", rows: 4, cols: 4, type: "Standard", color: SHELF_COLOR_PRESETS[0] };
 
 function ShelfSlotGrid({ filled, total, color }) {
@@ -1969,8 +2575,385 @@ function Settings({ authUser, isAdmin, items, shelves, settings, setSettings, us
     </div>
   );
 }
-function Support(props) { return <div className="empty-state">Support — coming soon.</div>; }
-function AdminPanel(props) { return <div className="empty-state">Admin Panel — coming soon.</div>; }
+function Support({ authUser, isAdmin, username, notify, supportTickets }) {
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [selectedId, setSelectedId] = useState(null);
+  const [replies, setReplies] = useState([]);
+  const [showNewForm, setShowNewForm] = useState(false);
+  const [newSubject, setNewSubject] = useState("");
+  const [newPriority, setNewPriority] = useState("medium");
+  const [newBody, setNewBody] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [replyText, setReplyText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [statusBusy, setStatusBusy] = useState(false);
+  const threadEndRef = useRef(null);
+
+  const filteredTickets = useMemo(() => {
+    const list = statusFilter === "all" ? supportTickets : supportTickets.filter((t) => t.status === statusFilter);
+    return [...list].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  }, [supportTickets, statusFilter]);
+
+  const selectedTicket = supportTickets.find((t) => t.id === selectedId) || null;
+
+  useEffect(() => {
+    if (!selectedId) { setReplies([]); return; }
+    const unsub = db.collection("support_tickets").doc(selectedId).collection("replies")
+      .orderBy("createdAt", "asc")
+      .onSnapshot((snap) => {
+        setReplies(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      }, (e) => console.warn("replies subscription error:", e));
+    return () => unsub();
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (threadEndRef.current) threadEndRef.current.scrollIntoView({ block: "nearest" });
+  }, [replies.length]);
+
+  const createTicket = async () => {
+    if (!newSubject.trim() || !newBody.trim()) { notify("Subject and message are required.", "error"); return; }
+    setCreating(true);
+    try {
+      const ref = await db.collection("support_tickets").add({
+        subject: newSubject.trim(),
+        body: newBody.trim(),
+        priority: newPriority,
+        status: "open",
+        authorEmail: authUser.email,
+        authorUsername: username || authUser.email,
+        authorUid: authUser.uid,
+        createdAt: Date.now(),
+      });
+      setNewSubject(""); setNewBody(""); setNewPriority("medium"); setShowNewForm(false);
+      setSelectedId(ref.id);
+      notify("Ticket created.", "success");
+    } catch (e) {
+      notify("Failed to create ticket: " + e.message, "error");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const changeStatus = async (status) => {
+    if (!isAdmin) { notify("Only admins can change ticket status.", "error"); return; }
+    if (!selectedTicket || selectedTicket.status === status) return;
+    setStatusBusy(true);
+    try {
+      await db.collection("support_tickets").doc(selectedTicket.id).update({ status, updatedAt: Date.now() });
+    } catch (e) {
+      notify("Failed to update status: " + e.message, "error");
+    } finally {
+      setStatusBusy(false);
+    }
+  };
+
+  const sendReply = async () => {
+    const body = replyText.trim();
+    if (!body || !selectedTicket || selectedTicket.status === "closed") return;
+    setSending(true);
+    try {
+      await db.collection("support_tickets").doc(selectedTicket.id).collection("replies").add({
+        body,
+        authorEmail: isAdmin ? "Admin" : authUser.email,
+        authorUsername: isAdmin ? "Admin" : (username || authUser.email),
+        authorUid: authUser.uid,
+        isAdmin: !!isAdmin,
+        createdAt: Date.now(),
+      });
+      await db.collection("support_tickets").doc(selectedTicket.id).update({ updatedAt: Date.now() });
+      setReplyText("");
+    } catch (e) {
+      notify("Failed to send reply: " + e.message, "error");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const onComposerKeyDown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendReply();
+    }
+  };
+
+  return (
+    <div>
+      <h1 className="page-title">Support</h1>
+      <p className="page-sub">Internal ticket tracking.</p>
+
+      <div className="support-layout">
+        <div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+            <button className="btn btn-primary btn-sm" onClick={() => setShowNewForm((s) => !s)}>
+              <Icon name="add" size={14} /> New Ticket
+            </button>
+          </div>
+
+          {showNewForm && (
+            <div className="card" style={{ marginBottom: 14 }}>
+              <div className="field">
+                <label>Subject</label>
+                <input type="text" value={newSubject} onChange={(e) => setNewSubject(e.target.value)} />
+              </div>
+              <div className="field">
+                <label>Priority</label>
+                <select value={newPriority} onChange={(e) => setNewPriority(e.target.value)}>
+                  {TICKET_PRIORITIES.map((p) => <option key={p} value={p}>{p[0].toUpperCase() + p.slice(1)}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label>Message</label>
+                <textarea rows={4} value={newBody} onChange={(e) => setNewBody(e.target.value)} />
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn btn-primary btn-sm" onClick={createTicket} disabled={creating}>
+                  {creating ? "Creating…" : "Create Ticket"}
+                </button>
+                <button className="btn btn-secondary btn-sm" onClick={() => setShowNewForm(false)} disabled={creating}>Cancel</button>
+              </div>
+            </div>
+          )}
+
+          <div className="status-pills">
+            <button className={"status-pill" + (statusFilter === "all" ? " active" : "")} onClick={() => setStatusFilter("all")}>All</button>
+            {TICKET_STATUSES.map((s) => (
+              <button key={s} className={"status-pill" + (statusFilter === s ? " active" : "")} onClick={() => setStatusFilter(s)}>
+                {TICKET_STATUS_LABEL[s]}
+              </button>
+            ))}
+          </div>
+
+          <div className="ticket-list">
+            {filteredTickets.length === 0 && <div className="empty-state">No tickets.</div>}
+            {filteredTickets.map((t) => (
+              <div key={t.id} className={"ticket-row" + (selectedId === t.id ? " active" : "")} onClick={() => setSelectedId(t.id)}>
+                <div className="ticket-row-top">
+                  <span className="ticket-subject">{t.subject}</span>
+                  <span className={"badge " + (TICKET_STATUS_BADGE[t.status] || "badge-muted")}>{TICKET_STATUS_LABEL[t.status] || t.status}</span>
+                </div>
+                <div className="ticket-meta-row">
+                  <span className={"badge " + (TICKET_PRIORITY_BADGE[t.priority] || "badge-muted")}>{t.priority}</span>
+                  <span>{t.authorUsername || t.authorEmail}</span>
+                  <span>·</span>
+                  <span>{relTime(t.createdAt)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="card">
+          {!selectedTicket && <div className="empty-state">Select a ticket to view details.</div>}
+          {selectedTicket && (
+            <React.Fragment>
+              <div className="ticket-detail-header">
+                <div>
+                  <h3 className="panel-title" style={{ marginBottom: 4 }}>{selectedTicket.subject}</h3>
+                  <div className="ticket-meta-row">
+                    <span>From {selectedTicket.authorUsername || selectedTicket.authorEmail}</span>
+                    <span>·</span>
+                    <span className={"badge " + (TICKET_PRIORITY_BADGE[selectedTicket.priority] || "badge-muted")}>{selectedTicket.priority}</span>
+                    <span className={"badge " + (TICKET_STATUS_BADGE[selectedTicket.status] || "badge-muted")}>{TICKET_STATUS_LABEL[selectedTicket.status] || selectedTicket.status}</span>
+                  </div>
+                </div>
+                {isAdmin ? (
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    {TICKET_STATUSES.map((s) => (
+                      <button
+                        key={s}
+                        className={"btn btn-sm " + (selectedTicket.status === s ? "btn-primary" : "btn-secondary")}
+                        disabled={statusBusy || selectedTicket.status === s}
+                        onClick={() => changeStatus(s)}
+                      >
+                        {TICKET_STATUS_LABEL[s]}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="locked-notice">Status can only be changed by an admin.</div>
+                )}
+              </div>
+
+              <div className="ticket-original">{selectedTicket.body}</div>
+
+              <div className="chat-thread">
+                {replies.map((r) => {
+                  const own = r.authorUid === authUser.uid;
+                  return (
+                    <div key={r.id} className={"chat-bubble-row " + (own ? "own" : "other")}>
+                      <div className="chat-bubble">{r.body}</div>
+                      <div className="chat-bubble-meta">
+                        {r.isAdmin && <span className="admin-badge">ADMIN</span>}
+                        <span>{r.isAdmin ? "Admin" : (r.authorUsername || r.authorEmail)}</span>
+                        <span>·</span>
+                        <span>{relTime(r.createdAt)}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+                <div ref={threadEndRef} />
+              </div>
+
+              {selectedTicket.status === "closed" ? (
+                <div className="closed-notice">This ticket is closed. Reopen it to add replies.</div>
+              ) : (
+                <div className="reply-composer">
+                  <textarea
+                    placeholder="Write a reply… (Enter to send, Shift+Enter for newline)"
+                    value={replyText}
+                    onChange={(e) => setReplyText(e.target.value)}
+                    onKeyDown={onComposerKeyDown}
+                  />
+                  <button className="btn btn-primary" onClick={sendReply} disabled={sending || !replyText.trim()}>Send</button>
+                </div>
+              )}
+            </React.Fragment>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+function AdminPanel({ authUser, notify }) {
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [selectedUid, setSelectedUid] = useState(null);
+  const [toggleBusy, setToggleBusy] = useState(null);
+
+  const loadUsers = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [metaSnap, adminsSnap] = await Promise.all([
+        db.collection("users_meta").get(),
+        db.collection("admins").get(),
+      ]);
+      const adminUids = new Set(adminsSnap.docs.map((d) => d.id));
+      const list = metaSnap.docs.map((d) => ({
+        uid: d.id,
+        ...d.data(),
+        isAdmin: adminUids.has(d.id),
+      }));
+      list.sort((a, b) => (a.email || "").localeCompare(b.email || ""));
+      setUsers(list);
+    } catch (e) {
+      notify("Failed to load users: " + e.message, "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [notify]);
+
+  useEffect(() => { loadUsers(); }, [loadUsers]);
+
+  const filtered = users.filter((u) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return (u.email || "").toLowerCase().includes(q) || u.uid.toLowerCase().includes(q);
+  });
+
+  const selectedUser = users.find((u) => u.uid === selectedUid) || null;
+
+  const toggleAdmin = async (user) => {
+    if (user.uid === authUser.uid && user.isAdmin) {
+      notify("You can't remove your own admin access.", "error");
+      return;
+    }
+    setToggleBusy(user.uid);
+    try {
+      if (user.isAdmin) {
+        await db.collection("admins").doc(user.uid).delete();
+      } else {
+        await db.collection("admins").doc(user.uid).set({
+          email: user.email || "",
+          grantedBy: authUser.email,
+          grantedAt: Date.now(),
+        });
+      }
+      setUsers((prev) => prev.map((u) => (u.uid === user.uid ? { ...u, isAdmin: !u.isAdmin } : u)));
+      notify(user.isAdmin ? "Admin access removed." : "Admin access granted.", "success");
+    } catch (e) {
+      notify("Failed to update role: " + e.message, "error");
+    } finally {
+      setToggleBusy(null);
+    }
+  };
+
+  if (loading) {
+    return <div className="empty-state">Loading users…</div>;
+  }
+
+  if (selectedUser) {
+    const initial = (selectedUser.email || "?").charAt(0).toUpperCase();
+    return (
+      <div>
+        <button className="btn btn-secondary btn-sm" style={{ marginBottom: 18 }} onClick={() => setSelectedUid(null)}>
+          ← Back to Users
+        </button>
+        <div className="card" style={{ maxWidth: 480 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 18 }}>
+            <div className="avatar-circle-lg">{initial}</div>
+            <div>
+              <div style={{ fontSize: "1.05rem", fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
+                {selectedUser.email}
+                {selectedUser.isAdmin && <span className="badge badge-info">ADMIN</span>}
+                {selectedUser.uid === authUser.uid && <span className="badge badge-muted">you</span>}
+              </div>
+              <div className="ticket-row-uid" style={{ fontFamily: "monospace", fontSize: "0.78rem", color: "var(--muted)" }}>{selectedUser.uid}</div>
+            </div>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 18 }}>
+            <div className="field-row"><strong style={{ minWidth: 80 }}>Email</strong><span>{selectedUser.email}</span></div>
+            <div className="field-row"><strong style={{ minWidth: 80 }}>UID</strong><span style={{ fontFamily: "monospace", fontSize: "0.82rem", userSelect: "all" }}>{selectedUser.uid}</span></div>
+            <div className="field-row"><strong style={{ minWidth: 80 }}>Role</strong><span className={"badge " + (selectedUser.isAdmin ? "badge-info" : "badge-muted")}>{selectedUser.isAdmin ? "Admin" : "User"}</span></div>
+          </div>
+          <button
+            className={"btn " + (selectedUser.isAdmin ? "btn-danger" : "btn-primary")}
+            disabled={toggleBusy === selectedUser.uid}
+            onClick={() => toggleAdmin(selectedUser)}
+          >
+            {selectedUser.isAdmin ? "Remove Admin Access" : "Grant Admin Access"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <h1 className="page-title">Admin Panel</h1>
+      <p className="page-sub">Manage user roles. Other users' inventory data is not accessible here.</p>
+
+      <div className="toolbar">
+        <input type="text" placeholder="Search by email or UID…" value={search} onChange={(e) => setSearch(e.target.value)} />
+      </div>
+
+      <div className="card" style={{ padding: 0 }}>
+        {filtered.length === 0 && <div className="empty-state">No users found.</div>}
+        {filtered.map((u) => {
+          const initial = (u.email || "?").charAt(0).toUpperCase();
+          return (
+            <div key={u.uid} className="user-row">
+              <div className="avatar-circle">{initial}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="user-row-email">{u.email}{u.uid === authUser.uid ? " (you)" : ""}</div>
+                <div className="user-row-uid">{u.uid}</div>
+              </div>
+              <span className={"badge " + (u.isAdmin ? "badge-info" : "badge-muted")}>{u.isAdmin ? "Admin" : "User"}</span>
+              <button className="btn btn-secondary btn-sm" onClick={() => setSelectedUid(u.uid)}>View</button>
+              <button
+                className={"btn btn-sm " + (u.isAdmin ? "btn-danger" : "btn-primary")}
+                disabled={toggleBusy === u.uid}
+                onClick={() => toggleAdmin(u)}
+              >
+                {u.isAdmin ? "Remove Admin" : "Make Admin"}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 // ============================================================
 // ROOT MOUNT

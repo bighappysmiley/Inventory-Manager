@@ -1,0 +1,83 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // Email-domain / super-admin auto-bootstrap, mirrors ensureAdminBootstrap() in app.js.
+    function isAutoBootstrapEligible() {
+      return signedIn()
+        && request.auth.token.email != null
+        && (request.auth.token.email.lower() == 'hf@bighappysmiley.com'
+            || request.auth.token.email.lower().matches('.*@bighappysmiley\\.com$'));
+    }
+
+    // ---------------------------------------------------------
+    // Per-user inventory data — fully isolated, owner-only.
+    // users/{uid}/items/{itemId}
+    // users/{uid}/shelves/{shelfId}
+    // users/{uid}/meta/{docId}  (settings doc holds mapLayout)
+    // ---------------------------------------------------------
+    match /users/{uid} {
+      match /{document=**} {
+        allow read, write: if isOwner(uid);
+      }
+    }
+
+    // ---------------------------------------------------------
+    // users_meta/{uid} — profile/config doc.
+    // Readable by any signed-in user (needed for username-uniqueness checks
+    // at registration/rename, and for the admin user directory). Only the
+    // user themself may write their own doc — admins manage roles via the
+    // separate `admins` collection, never by editing another user's profile.
+    // ---------------------------------------------------------
+    match /users_meta/{uid} {
+      allow read: if signedIn();
+      allow write: if isOwner(uid);
+    }
+
+    // ---------------------------------------------------------
+    // admins/{uid} — role-membership flags.
+    // - Any signed-in user may check/read their own doc (to learn their own
+    //   admin status); admins may read/list the whole collection.
+    // - A user may create their OWN doc only via the auto-bootstrap path
+    //   (super-admin email or company domain), matching ensureAdminBootstrap().
+    // - Existing admins may grant/revoke admin access for any OTHER user.
+    // - No one may delete their own admin doc (defense-in-depth backing the
+    //   client-side "can't remove your own admin access" guard).
+    // ---------------------------------------------------------
+    match /admins/{uid} {
+      allow get: if isOwner(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if (isOwner(uid) && isAutoBootstrapEligible()) || isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin() && request.auth.uid != uid;
+    }
+
+    // ---------------------------------------------------------
+    // support_tickets/{ticketId} (+ replies subcollection)
+    // Admin-only end to end — this area is entirely hidden from
+    // non-admin users in the UI, and Firestore enforces the same here.
+    // ---------------------------------------------------------
+    match /support_tickets/{ticketId} {
+      allow read, create, update: if isAdmin();
+      allow delete: if false;
+
+      match /replies/{replyId} {
+        allow read, create: if isAdmin();
+        allow update, delete: if false;
+      }
+    }
+  }
+}
