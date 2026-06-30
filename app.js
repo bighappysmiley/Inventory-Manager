@@ -1789,10 +1789,13 @@ function WarehouseMap3D({ shelves, items, settings, categories }) {
       <div ref={mountRef} style={{ width: "100%", height: "100%" }} />
 
       {!entered && (
-        <div style={{
-          position: "absolute", inset: 0, background: "rgba(10,12,18,0.55)", color: "#fff",
-          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, textAlign: "center", padding: 20,
-        }}>
+        <div
+          onClick={() => mountRef.current && mountRef.current.requestPointerLock()}
+          style={{
+            position: "absolute", inset: 0, background: "rgba(10,12,18,0.55)", color: "#fff",
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, textAlign: "center", padding: 20,
+            cursor: "pointer",
+          }}>
           <h2 style={{ margin: 0 }}>Click to Enter</h2>
           {!hasShelvesOnMap && (
             <p style={{ color: "#ffce6b", maxWidth: 360 }}>
