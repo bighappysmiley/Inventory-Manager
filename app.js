@@ -1651,7 +1651,7 @@ function WarehouseMap3D({ shelves, items, settings, categories }) {
 
     // Movement state
     const keys = {};
-    let yaw = Math.PI;
+    let yaw = 0; // yaw 0 faces -Z, matching the spawn point looking into the room
     let pitch = 0;
     let walkDist = 0;
     const onKeyDown = (e) => {
@@ -1725,7 +1725,7 @@ function WarehouseMap3D({ shelves, items, settings, categories }) {
       if (document.pointerLockElement === mount) {
         const sprint = keys["ShiftLeft"] || keys["ShiftRight"];
         const speed = MOVE_SPEED * (sprint ? SPRINT_MULT : 1) * dt;
-        const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+        const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
         const right = new THREE.Vector3(Math.sin(yaw + Math.PI / 2), 0, Math.cos(yaw + Math.PI / 2));
         let moved = false;
         const move = new THREE.Vector3();
