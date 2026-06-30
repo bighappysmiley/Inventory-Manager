@@ -1861,22 +1861,28 @@ function WarehouseMap(props) {
 }
 const EMPTY_SHELF_FORM = { name: "", rows: 4, cols: 4, type: "Standard", color: SHELF_COLOR_PRESETS[0] };
 
-function ShelfSlotGrid({ filled, total, color }) {
-  const visible = Math.min(total, 32);
-  const overflow = total - visible;
-  const squares = [];
-  for (let i = 0; i < visible; i++) {
-    squares.push(
+function ShelfSlotGrid({ filled, color, rows, cols }) {
+  const r = Math.max(1, Number(rows) || 1);
+  const c = Math.max(1, Number(cols) || 1);
+  const cellSize = r > 16 || c > 16 ? 8 : r > 10 || c > 10 ? 10 : 14;
+  const total = r * c;
+  const cells = [];
+  for (let i = 0; i < total; i++) {
+    cells.push(
       <div key={i} style={{
-        width: 12, height: 12, borderRadius: 2,
+        width: cellSize, height: cellSize, borderRadius: 2,
         background: i < filled ? color : "var(--border)",
       }} />
     );
   }
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
-      {squares}
-      {overflow > 0 && <span style={{ fontSize: "0.65rem", color: "var(--muted)", marginLeft: 4 }}>+{overflow} more</span>}
+    <div style={{
+      display: "grid",
+      gridTemplateColumns: `repeat(${c}, ${cellSize}px)`,
+      gridTemplateRows: `repeat(${r}, ${cellSize}px)`,
+      gap: 3,
+    }}>
+      {cells}
     </div>
   );
 }
@@ -2022,7 +2028,7 @@ function StorageSetup({ authUser, items, shelves, settings, setSettings, notify 
                 </div>
               </div>
               <div style={{ margin: "12px 0" }}>
-                <ShelfSlotGrid filled={0} total={(Number(form.rows) || 1) * (Number(form.cols) || 1)} color={form.color} />
+                <ShelfSlotGrid filled={0} rows={Number(form.rows) || 1} cols={Number(form.cols) || 1} color={form.color} />
               </div>
               <div className="progress-track" style={{ marginBottom: 6 }}>
                 <div className="progress-fill" style={{ width: "0%", background: form.color }} />
@@ -2102,7 +2108,7 @@ function StorageSetup({ authUser, items, shelves, settings, setSettings, notify 
                   </div>
                 </div>
                 <div style={{ margin: "12px 0" }}>
-                  <ShelfSlotGrid filled={filled} total={total} color={shelf.color} />
+                  <ShelfSlotGrid filled={filled} rows={shelf.rows || 1} cols={shelf.cols || 1} color={shelf.color} />
                 </div>
                 <div className="progress-track" style={{ marginBottom: 6 }}>
                   <div className="progress-fill" style={{ width: pct + "%", background: shelf.color }} />
