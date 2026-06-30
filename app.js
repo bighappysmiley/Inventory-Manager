@@ -5,15 +5,13 @@ const { useState, useEffect, useRef, useContext, createContext, useMemo, useCall
 // ============================================================
 // FIREBASE INIT
 // ============================================================
-// TODO: replace with your real Firebase project config
-// (Firebase console → Project settings → General → Your apps → SDK setup and configuration)
 const firebaseConfig = {
-  apiKey: "REPLACE_ME",
-  authDomain: "REPLACE_ME.firebaseapp.com",
-  projectId: "REPLACE_ME",
-  storageBucket: "REPLACE_ME.appspot.com",
-  messagingSenderId: "REPLACE_ME",
-  appId: "REPLACE_ME",
+  apiKey: "AIzaSyCyulAGSax77ZqiSxYD4Z1_szcviDj0HxQ",
+  authDomain: "inventory-manager-bhs.firebaseapp.com",
+  projectId: "inventory-manager-bhs",
+  storageBucket: "inventory-manager-bhs.firebasestorage.app",
+  messagingSenderId: "105793119792",
+  appId: "1:105793119792:web:fc6d697587870b471aeff5",
 };
 
 firebase.initializeApp(firebaseConfig);
