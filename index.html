@@ -4,6 +4,22 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Inventory Manager — by BigHappySmiley</title>
+<script>
+  // Defensive cleanup: if this origin ever had a service worker or cached
+  // responses registered by an older/different deploy, they can keep
+  // serving stale (and incompatible) content forever even after a fresh
+  // deploy. Unregister and clear on every load so a redeploy always wins.
+  if (window.navigator && navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+    navigator.serviceWorker.getRegistrations().then(function (regs) {
+      regs.forEach(function (reg) { reg.unregister(); });
+    }).catch(function () {});
+  }
+  if (window.caches && caches.keys) {
+    caches.keys().then(function (keys) {
+      keys.forEach(function (key) { caches.delete(key); });
+    }).catch(function () {});
+  }
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=DM+Sans:wght@700;800&display=swap" rel="stylesheet">
@@ -12,7 +28,7 @@
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <!-- In-browser JSX transform -->
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
 <!-- Firebase compat SDK (script-tag friendly, no bundler) -->
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
@@ -307,6 +323,6 @@ html[data-theme="light"] .closed-notice, html[data-theme="light"] .locked-notice
     }, 4000);
   })();
 </script>
-<script type="text/babel" data-presets="react,env" src="./app.js"></script>
+<script type="text/babel" data-presets="react,env" src="./app.js?v=20260630"></script>
 </body>
 </html>

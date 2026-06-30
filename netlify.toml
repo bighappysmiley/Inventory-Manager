@@ -12,3 +12,16 @@
   from = "/*"
   to = "/index.html"
   status = 200
+
+# Never let the browser/CDN cache a stale index.html across deploys —
+# this is a single-page app and the HTML is the entry point that must
+# always reflect the latest deploy.
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
