@@ -1,6 +1,13 @@
 [build]
   publish = "."
 
+# This app loads app.js as an in-browser-Babel script (type="text/babel").
+# Netlify's automatic JS post-processing detects files by extension and will
+# try to minify/bundle app.js as plain JavaScript, which breaks on the JSX
+# syntax inside it. Disable post-processing so the file is served as-is.
+[build.processing]
+  skip_processing = true
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
